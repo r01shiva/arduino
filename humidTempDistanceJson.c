@@ -46,7 +46,7 @@ float getDistance() {
 float getTemperature() {
   dht.begin();
   float temperature = dht.readTemperature();
-  while (temperature < 0 ){
+  while (temperature != temperature ){
     temperature = dht.readTemperature();
   }
   return temperature;
@@ -55,7 +55,7 @@ float getTemperature() {
 float getHumidity() {
   dht.begin();
   float humidity = dht.readHumidity();
-  while (humidity < 0 ){
+  while (humidity != humdity ){
     humidity = dht.readHumidity();
   }
   return humidity;
