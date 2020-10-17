@@ -1,27 +1,33 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoJson.h>
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
 #include "NewPing.h"
 #include "DHT.h"
+#include "PIR.h"
 
-const char* ssid     = "Snap!";
-const char* password = "@Abhi98999";
+#define WLAN_SSID       "Snap!"
+#define WLAN_PASS       "@Abhi98999"
+
+#define AIO_SERVER      "io.adafruit.com"
+#define AIO_SERVERPORT  1883                   // use 8883 for SSL
+#define AIO_USERNAME    "r01shiva"
+#define AIO_KEY         "aio_hzXY903RSs1hnNP6J1gtfZrGHWnI"
 
 #define DHTPIN 2 // what digital pin we're connected to
-const int trigP = 5;  //D4 Or GPIO-2 of nodemcu
-const int echoP = 4;  //D3 Or GPIO-0 of nodemcu
-const int output1 = 14;
-const int output2 = 12;
-const int output3 = 13;
-const int output4 = 15;
+const int output1 = 5;
+const int output2 = 14;
+const int output3 = 12;
+const int output4 = 13;
+const int pir_sig = 15;
 const long timeoutTime = 2000;
+
 #define DHTTYPE DHT11 // DHT 11
-int echoTime;             // echo time
 String header;
-int maxdist = 200;        // set maximum scan distance (cm)
 long duration;
-float distance;
 unsigned long currentTime = millis();
 unsigned long previousTime = 0;
+
 String output1State = "off";
 String output2State = "off";
 String output3State = "off";
@@ -34,14 +40,12 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);
 IPAddress secondaryDNS(8, 8, 4, 4);
 
-NewPing sonar(trigP, echoP, maxdist);
-DHT dht(DHTPIN, DHTTYPE);
+WiFiClient client;
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
+Adafruit_MQTT_Subscribe onoffbutton = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/Room Light");
 
-float getDistance() {
-  NewPing hcsr04(trigP,echoP);
-  int distance = hcsr04.ping_cm();
-  return distance;
-}
+DHT dht(DHTPIN, DHTTYPE);
+PIR pir(pir_sig);
 
 float getTemperature() {
   dht.begin();
@@ -55,20 +59,15 @@ float getTemperature() {
 float getHumidity() {
   dht.begin();
   float humidity = dht.readHumidity();
-  while (humidity != humdity ){
+  while (humidity != humidity ){
     humidity = dht.readHumidity();
   }
   return humidity;
 }
 
-float getActualDistance() {
-  dht.begin();
-  echoTime = sonar.ping();          // echo time (μs)
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
-  float vsound = 331.3+(0.606*temperature)+(0.0124*humidity);
-  distance = (echoTime/2.0)*vsound/10000; // distance between sensor and target
-  return distance;
+bool getPIR() {
+  bool pirVal = pir.read();
+  return pirVal;
 }
 
 void setup() {
@@ -76,23 +75,18 @@ void setup() {
   pinMode(output2, OUTPUT);
   pinMode(output3, OUTPUT);
   pinMode(output4, OUTPUT);
-  pinMode(trigP, OUTPUT);
-  pinMode(echoP, INPUT);
   digitalWrite(output1, HIGH);
   digitalWrite(output2, HIGH);
   digitalWrite(output3, HIGH);
   digitalWrite(output4, HIGH);
-  dht.begin();
   Serial.begin(115200);
+  dht.begin();
   Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
+  Serial.println(WLAN_SSID);
+  WiFi.begin(WLAN_SSID, WLAN_PASS);
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
     Serial.println("STA Failed to configure");
   }
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -102,10 +96,39 @@ void setup() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
   server.begin();
+  mqtt.subscribe(&onoffbutton);
 }
 
+uint32_t x=0;
+
 void loop(){
-  WiFiClient client = server.available();   // Listen for incoming clients
+  request_from_wifi();
+  request_from_mqtt();
+}
+
+void request_from_mqtt(){
+  MQTT_connect();
+  Adafruit_MQTT_Subscribe *subscription;
+  while ((subscription = mqtt.readSubscription(1000))) {
+    if (subscription == &onoffbutton) {
+      Serial.print(F("Got: "));
+      Serial.println((char *)onoffbutton.lastread);
+      uint16_t state = atoi((char *)onoffbutton.lastread);
+      if (state == 0) {
+        digitalWrite(output1, LOW);
+        Serial.print("LOW");
+      }
+      else if(state == 1) {
+        digitalWrite(output1, HIGH);
+        Serial.print("HIGH");
+      }
+      Serial.print(state);
+    }
+  }
+}
+
+void request_from_wifi() {
+  WiFiClient client = server.available();
   if (client) {                             // If a new client connects,
     Serial.println("New Client.");          // print a message out in the serial port
     String currentLine = "";                // make a String to hold incoming data from the client
@@ -128,22 +151,13 @@ void loop(){
             client.println("Connection: close");
             client.println();
 
-            if (header.indexOf("GET /distance") >= 0) {
-              StaticJsonBuffer<200> jsonBuffer;
-              JsonObject& root = jsonBuffer.createObject();
-              Serial.println("Getting distance");
-              root["distance"] = "ultrasonic";
-              JsonArray& data = root.createNestedArray("data");
-              data.add(getDistance());
-              data.add(getDistance());
-              root.printTo(Serial);
-              root.printTo(client);
-            }
-            else if (header.indexOf("GET /temperature") >= 0) {
+            if (header.indexOf("GET /temperature") >= 0) {
               StaticJsonBuffer<200> jsonBuffer;
               JsonObject& root = jsonBuffer.createObject();
               Serial.println("Getting temperature");
               root["temperature"] = "temperature_sensor";
+              // JsonArray& data = root.createNestedArray("data");
+              // data.add(getTemperature());
               root["value"] = getTemperature();
               root.printTo(Serial);
               root.printTo(client);
@@ -153,20 +167,26 @@ void loop(){
               JsonObject& root = jsonBuffer.createObject();
               Serial.println("Getting humidity");
               root["humdity"] = "humidity_sensor";
+              // JsonArray& data = root.createNestedArray("data");
+              // data.add(getHumidity());
               root["value"] = getHumidity();
               root.printTo(Serial);
               root.printTo(client);
             }
-            else if (header.indexOf("GET /getActualDistance") >= 0) {
+            else if (header.indexOf("GET /pir") >= 0) {
               StaticJsonBuffer<200> jsonBuffer;
               JsonObject& root = jsonBuffer.createObject();
-              Serial.println("Getting actual distance");
-              root["distance"] = "ultrasonic_temperature_sensor";
-              JsonArray& data = root.createNestedArray("data");
-              data.add(getActualDistance());
+              Serial.println("Getting PIR");
+              root["PIR"] = "pir_sensor";
+              // JsonArray& data = root.createNestedArray("data");
+              // data.add(getHumidity());
+              root["value"] = getPIR();
+              Serial.print(F("Val: "));
+              Serial.println(getPIR());
               root.printTo(Serial);
               root.printTo(client);
             }
+            // turns the GPIOs on and off
             else if (header.indexOf("GET /1/on") >= 0) {
               Serial.println("GPIO 1 on");
               output1State = "on";
@@ -210,7 +230,8 @@ void loop(){
           } else {
             currentLine = "";
           }
-        } else if (c != '\r') {
+        }
+        else if (c != '\r') {
           currentLine += c;
         }
       }
@@ -220,5 +241,29 @@ void loop(){
     Serial.println("Client disconnected.");
     Serial.println("");
   }
-  // Serial.println("loop___");
+}
+
+void MQTT_connect() {
+  int8_t ret;
+
+  // Stop if already connected.
+  if (mqtt.connected()) {
+    return;
+  }
+
+  Serial.print("Connecting to MQTT... ");
+
+  uint8_t retries = 3;
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+       Serial.println(mqtt.connectErrorString(ret));
+       Serial.println("Retrying MQTT connection in 5 seconds...");
+       mqtt.disconnect();
+       delay(1000);  // wait 5 seconds
+       retries--;
+       if (retries == 0) {
+         // basically die and wait for WDT to reset me
+         while (1);
+       }
+  }
+  Serial.println("MQTT Connected!");
 }

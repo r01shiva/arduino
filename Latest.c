@@ -28,7 +28,7 @@ String output3State = "off";
 String output4State = "off";
 
 WiFiServer server(80);
-IPAddress local_IP(192, 168, 0, 165);
+IPAddress local_IP(192, 168, 0, 164);
 IPAddress gateway(192, 168, 0, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);
@@ -46,7 +46,7 @@ float getDistance() {
 float getTemperature() {
   dht.begin();
   float temperature = dht.readTemperature();
-  while (temperature != temperature ){
+  while (temperature < 0 ){
     temperature = dht.readTemperature();
   }
   return temperature;
@@ -55,7 +55,7 @@ float getTemperature() {
 float getHumidity() {
   dht.begin();
   float humidity = dht.readHumidity();
-  while (humidity != humdity ){
+  while (humidity < 0 ){
     humidity = dht.readHumidity();
   }
   return humidity;
@@ -76,12 +76,12 @@ void setup() {
   pinMode(output2, OUTPUT);
   pinMode(output3, OUTPUT);
   pinMode(output4, OUTPUT);
-  pinMode(trigP, OUTPUT);
-  pinMode(echoP, INPUT);
   digitalWrite(output1, HIGH);
   digitalWrite(output2, HIGH);
   digitalWrite(output3, HIGH);
   digitalWrite(output4, HIGH);
+  pinMode(trigP, OUTPUT);
+  pinMode(echoP, INPUT);
   dht.begin();
   Serial.begin(115200);
   Serial.print("Connecting to ");
@@ -94,7 +94,7 @@ void setup() {
   Serial.println(ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(50);
     Serial.print(".");
   }
   Serial.println("");
@@ -144,6 +144,8 @@ void loop(){
               JsonObject& root = jsonBuffer.createObject();
               Serial.println("Getting temperature");
               root["temperature"] = "temperature_sensor";
+              // JsonArray& data = root.createNestedArray("data");
+              // data.add(getTemperature());
               root["value"] = getTemperature();
               root.printTo(Serial);
               root.printTo(client);
@@ -153,6 +155,8 @@ void loop(){
               JsonObject& root = jsonBuffer.createObject();
               Serial.println("Getting humidity");
               root["humdity"] = "humidity_sensor";
+              // JsonArray& data = root.createNestedArray("data");
+              // data.add(getHumidity());
               root["value"] = getHumidity();
               root.printTo(Serial);
               root.printTo(client);
@@ -167,6 +171,7 @@ void loop(){
               root.printTo(Serial);
               root.printTo(client);
             }
+            // turns the GPIOs on and off
             else if (header.indexOf("GET /1/on") >= 0) {
               Serial.println("GPIO 1 on");
               output1State = "on";
@@ -220,5 +225,4 @@ void loop(){
     Serial.println("Client disconnected.");
     Serial.println("");
   }
-  // Serial.println("loop___");
 }
