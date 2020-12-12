@@ -33,10 +33,9 @@ String output2State = "off";
 String output3State = "off";
 String output4State = "off";
 String pirState = "off";
-bool pirVal;
 
 WiFiServer server(80);
-IPAddress local_IP(192, 168, 0, 165);
+IPAddress local_IP(192, 168, 0, 164);
 IPAddress gateway(192, 168, 0, 1);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);
@@ -68,15 +67,15 @@ float getHumidity() {
 }
 
 void setBulb(){
-  pirVal = pir.read();
+  bool pirVal = pir.read();
   if (pirVal == 1) {
-      digitalWrite(output2, LOW);
-//       Serial.println("On");
-    }
-    else if (pirVal == 0) {
-      digitalWrite(output2, HIGH);
-//       Serial.println("Off");
-    }
+    digitalWrite(output2, LOW);
+    output2State = "on";
+  }
+  else if (pirVal == 0) {
+    digitalWrite(output2, HIGH);
+    output2State = "off";
+  }
 }
 
 void setup() {
@@ -237,20 +236,20 @@ void request_from_wifi() {
               digitalWrite(output2, HIGH);
               digitalWrite(output3, HIGH);
             }
+            else if (header.indexOf("GET /pir/on") >= 0) {
+              pirState = "on";
+            }
             else if (header.indexOf("GET /pir/off") >= 0) {
               pirState = "off";
               digitalWrite(output2, HIGH);
-            }
-            else if (header.indexOf("GET /pir/on") >= 0) {
-              pirState = "on";
             }
             else if (header.indexOf("GET /getState") >= 0) {
               StaticJsonBuffer<200> jsonBuffer;
               JsonObject& root = jsonBuffer.createObject();
               root["PIR"] = pirState;
-              root["RELAY_1"] = output1State;
-              root["RELAY_2"] = output2State;
-              root["RELAY_3"] = output3State;
+              root["Shed Light"] = output1State;
+              root["Light"] = output2State;
+              root["Fan"] = output3State;
               root.printTo(client);
             }
           } else {
