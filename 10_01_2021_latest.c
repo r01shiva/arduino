@@ -17,7 +17,7 @@ const int output2 = 14;
 const int output3 = 12;
 const int output4 = 13;
 const int pir_sig = 4; //D2
-const long timeoutTime = 2000;
+const long timeoutTime = 800;
 const long utcOffsetInSeconds = 19800;
 
 long duration;
@@ -30,11 +30,6 @@ char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 String output1State = "off";
 String output2State = "off";
 String output3State = "off";
-String pirState = "off";
-String path = "/logs";
-String pathAPI = "/APIs";
-String node = "free_heap_size_in_bytes";
-String api = "";
 
 WiFiServer server(80);
 IPAddress local_IP(192, 168, 0, 164);
@@ -77,55 +72,77 @@ void setup() {
 
   Serial.begin(115200);
 
-  Serial.print("Connecting to ");
-  Serial.println(WLAN_SSID);
+  Serial.print(F("Connecting to "));
+  Serial.println(F(WLAN_SSID));
   WiFi.begin(WLAN_SSID, WLAN_PASS);
   if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
-    Serial.println("STA Failed to configure");
+    Serial.println(F("STA Failed to configure"));
   }
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    Serial.print(F("."));
   }
 
-  Serial.println("");
-  Serial.print("Connected with => ");
+  Serial.println(F(""));
+  Serial.print(F("Connected with => "));
   Serial.print(WiFi.localIP());
 
-  timeClient.begin();
-  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
-  server.begin();
   dht.begin();
-  timeClient.update();
-  String clock = String(daysOfTheWeek[timeClient.getDay()]) + ", " + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
-  Firebase.setString(firebaseData, path + "/" + "Setup at " + clock, String(ESP.getFreeHeap()));
+  server.begin();
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  timeClient.begin();
+  update_api_log(" -- Start", "Start");
+  // Serial.println(getValue("1", "State"));
+  setInitialState();
+}
+
+void setInitialState(){
+  if (getValue("1", "State") == "true") {
+    digitalWrite(output1, LOW);
+    output1State = "on";
+  }
+  if (getValue("2", "State") == "true") {
+    digitalWrite(output2, LOW);
+    output1State = "on";
+  }
+  if (getValue("3", "State") == "true") {
+    digitalWrite(output3, LOW);
+    output1State = "on";
+  }
 }
 
 
 void loop(){
+  auto_restart();
   request_from_wifi();
-  if (int(ESP.getFreeHeap()) <= 3000){
-    update_log();
-    Serial.println("Restarting");
+}
+
+void auto_restart(){
+  if (int(ESP.getFreeHeap()) <= 30000){
+    update_api_log(" -- Restart", "Restart");
     ESP.restart();
   }
 }
 
-void update_log(){
+void update_api_log(String api, String path){
   timeClient.update();
-  String clock = String(daysOfTheWeek[timeClient.getDay()]) + ", " + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
-  Firebase.setString(firebaseData, path + "/" + clock, String(ESP.getFreeHeap()));
+  Firebase.setString(firebaseData, path + "/" + daysOfTheWeek[timeClient.getDay()] + ", " + timeClient.getFormattedTime(), String(ESP.getFreeHeap()) + api);
 }
 
-void update_api_log(){
+void update_state(String device, String path, String value){
   timeClient.update();
-  String clock = String(daysOfTheWeek[timeClient.getDay()]) + ", " + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
-  Firebase.setString(firebaseData, pathAPI + "/" + clock, String(ESP.getFreeHeap()) + api);
+  Firebase.setString(firebaseData, path + "/" + device, value);
+}
+
+String getValue(String device, String path){
+  Firebase.getString(firebaseData, path + "/" + device);
+  return firebaseData.stringData();
 }
 
 void request_from_wifi() {
   WiFiClient client = server.available();
+  auto_restart();
   if (client) {                             // If a new client connects,
     String currentLine = "";                // make a String to hold incoming data from the client
     currentTime = millis();
@@ -137,9 +154,9 @@ void request_from_wifi() {
         header += c;
         if (c == '\n') {                    // if the byte is a newline character
           if (currentLine.length() == 0) {
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
+            client.println(F("HTTP/1.1 200 OK"));
+            client.println(F("Content-type:text/html"));
+            client.println(F("Connection: close"));
             client.println();
 
             if (header.indexOf("GET /temperature") >= 0) {
@@ -147,56 +164,53 @@ void request_from_wifi() {
               JsonObject& root = jsonBuffer.createObject();
               root["temperature_sensor"] = getTemperature();
               root.printTo(client);
-              api = " -- Temperature";
-              update_api_log();
+              update_api_log(" -- Temperature", "API");
             }
             else if (header.indexOf("GET /humidity") >= 0) {
               StaticJsonBuffer<200> jsonBuffer;
               JsonObject& root = jsonBuffer.createObject();
               root["humidity_sensor"] = getHumidity();
               root.printTo(client);
-              api = " -- Humidity";
-              update_api_log();
+              update_api_log(" -- Humidity", "API");
             }
             else if (header.indexOf("GET /1/on") >= 0) {
               output1State = "on";
               digitalWrite(output1, LOW);
-              api = " -- Shed Light/on";
-              update_api_log();
+              update_api_log(" -- Shed Light/on", "API");
+              update_state("1", "State", "true");
             }
             else if (header.indexOf("GET /1/off") >= 0) {
               output1State = "off";
               digitalWrite(output1, HIGH);
-              api = " -- Shed Light/off";
-              update_api_log();
+              update_api_log(" -- Shed Light/off", "API");
+              update_state("1", "State", "false");
             }
             else if (header.indexOf("GET /2/on") >= 0) {
               output2State = "on";
               digitalWrite(output2, LOW);
-              api = " -- Light/on";
-              update_api_log();
+              update_api_log(" -- Light/on", "API");
+              update_state("2", "State", "true");
             }
             else if (header.indexOf("GET /2/off") >= 0) {
               output2State = "off";
               digitalWrite(output2, HIGH);
-              api = " -- Light/off";
-              update_api_log();
+              update_api_log(" -- Light/off", "API");
+              update_state("2", "State", "false");
             }
             else if (header.indexOf("GET /3/on") >= 0) {
               output3State = "on";
               digitalWrite(output3, LOW);
-              api = " -- Fan/on";
-              update_api_log();
+              update_api_log(" -- Fan/on", "API");
+              update_state("3", "State", "true");
             }
             else if (header.indexOf("GET /3/off") >= 0) {
               output3State = "off";
               digitalWrite(output3, HIGH);
-              api = " -- Fan/off";
-              update_api_log();
+              update_api_log(" -- Fan/off", "API");
+              update_state("4", "State", "false");
             }
             else if (header.indexOf("GET /restart") >= 0) {
-              api = " -- Restart";
-              update_api_log();
+              update_api_log(" -- Restart", "API");
               ESP.restart();
             }
             else if (header.indexOf("GET /on") >= 0) {
@@ -206,8 +220,7 @@ void request_from_wifi() {
               digitalWrite(output1, LOW);
               digitalWrite(output2, LOW);
               digitalWrite(output3, LOW);
-              api = " -- All On ";
-              update_api_log();
+              update_api_log(" -- All On ", "API");
             }
             else if (header.indexOf("GET /off") >= 0) {
               output1State = "off";
@@ -216,8 +229,7 @@ void request_from_wifi() {
               digitalWrite(output1, HIGH);
               digitalWrite(output2, HIGH);
               digitalWrite(output3, HIGH);
-              api = " -- All Off";
-              update_api_log();
+              update_api_log(" -- All Off", "API");
             }
             else if (header.indexOf("GET /getState") >= 0) {
               StaticJsonBuffer<200> jsonBuffer;
@@ -227,8 +239,7 @@ void request_from_wifi() {
               root["Fan"] = output3State;
               root["Heap"] = String(ESP.getFreeHeap());
               root.printTo(client);
-              api = " -- State";
-              update_api_log();
+              update_api_log(" -- State", "API");
             }
           } else {
             currentLine = "";
